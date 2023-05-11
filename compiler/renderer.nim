@@ -48,6 +48,7 @@ type
     inGenericParams: bool
     checkAnon: bool        # we're in a context that can contain sfAnon
     inPragma: int
+    indentComment: int
     when defined(nimpretty):
       pendingNewlineCount: int
     fid*: FileIndex
@@ -312,19 +313,24 @@ proc shouldRenderComment(g: TSrcGen, n: PNode): bool {.inline.} =
 proc gcom(g: var TSrcGen, n: PNode) =
   assert(n != nil)
   if shouldRenderComment(g, n):
-    var oneSpaceAdded = 0
-    if (g.pendingNL < 0) and (g.buf.len > 0) and (g.buf[^1] != ' '):
-      put(g, tkSpaces, Space)
-      oneSpaceAdded = 1
-      # Before long comments we cannot make sure that a newline is generated,
-      # because this might be wrong. But it is no problem in practice.
-    if (g.pendingNL < 0) and (g.buf.len > 0) and
-        (g.col < LineCommentColumn):
-      var ml = maxLineLength(n.comment)
-      if ml + LineCommentColumn <= MaxLineLen:
-        put(g, tkSpaces, spaces(LineCommentColumn - g.col))
-        dec g.col, oneSpaceAdded
+    # var oneSpaceAdded = 0
+    # if (g.pendingNL < 0) and (g.buf.len > 0) and (g.buf[^1] != ' '):
+    #   put(g, tkSpaces, Space)
+    #   oneSpaceAdded = 1
+    #   # Before long comments we cannot make sure that a newline is generated,
+    #   # because this might be wrong. But it is no problem in practice.
+    # if (g.pendingNL < 0) and (g.buf.len > 0) and
+    #     (g.col < LineCommentColumn):
+    #   var ml = maxLineLength(n.comment)
+    #   if ml + LineCommentColumn <= MaxLineLen:
+    #     # put(g, tkSpaces, spaces(LineCommentColumn - g.col))
+    #     dec g.col, oneSpaceAdded
+    if g.indentComment > 0:
+      indentNL(g)
+    optNL(g)
     putComment(g, n.comment)  #assert(g.comStack[high(g.comStack)] = n);
+    if g.indentComment > 0:
+      dedent(g)
 
 proc gcoms(g: var TSrcGen) =
   for i in 0..high(g.comStack): gcom(g, g.comStack[i])
@@ -1458,6 +1464,7 @@ proc gsub(g: var TSrcGen, n: PNode, c: TContext, fromStmtList = false) =
     else:
       put(g, tkDistinct, "distinct")
   of nkTypeDef:
+    inc g.indentComment
     if n[0].kind == nkPragmaExpr:
       # generate pragma after generic
       gsub(g, n[0], 0)
@@ -1470,6 +1477,7 @@ proc gsub(g: var TSrcGen, n: PNode, c: TContext, fromStmtList = false) =
     if n.len > 2 and n[2].kind != nkEmpty:
       putWithSpace(g, tkEquals, "=")
       gsub(g, n[2])
+    dec g.indentComment
   of nkObjectTy:
     if n.len > 0:
       putWithSpace(g, tkObject, "object")
@@ -1514,13 +1522,15 @@ proc gsub(g: var TSrcGen, n: PNode, c: TContext, fromStmtList = false) =
     put(g, tkBracketRi, "]")
   of nkEnumTy:
     if n.len > 0:
+      inc g.indentComment
       putWithSpace(g, tkEnum, "enum")
       gsub(g, n[0])
-      gcoms(g)
       indentNL(g)
+      gcoms(g)
       gcommaAux(g, n, g.indent, 1)
       gcoms(g)                  # BUGFIX: comment for the last enum field
       dedent(g)
+      dec g.indentComment
     else:
       put(g, tkEnum, "enum")
   of nkEnumFieldDef:
